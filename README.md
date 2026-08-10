@@ -195,7 +195,25 @@ You are a professional receptionist for a medical clinic. Help callers schedule 
 ```
 
 See the Configuration section below for voice, STT, and LLM options.
+## Challenge Progress — 10 Days of Voice Agents
 
+Building an English Learning Coach voice agent (Learning & Literacy track) on top of this starter, using Murf Falcon TTS.
+
+### Day 4 – Memory
+Added `lookup_user` and `save_user_memory` tools so the agent remembers learner details (name, level, goals, common mistakes) across sessions — only with explicit learner consent.
+
+### Day 5 – Tools
+Added a `get_exercise` tool (`src/learning_tools.py`) that fetches a practice sentence for the learner based on their CEFR level (A1–C2) and optionally a topic.
+
+**Data source:** Local dataset (`data/cefr-sp.json` — CEFR-SP, ~10,000 pre-labeled English sentences by CEFR level). This is NOT a live API — static local dataset, so sentences may repeat across sessions over time.
+
+**Failure handling:** If no exercise matches the requested topic/level, the agent tells the learner honestly instead of inventing a sentence, and offers a general exercise or a different topic instead.
+
+**Example:**
+- User: "Give me a beginner sentence."
+- Agent: fetches and speaks an A1-level sentence from CEFR-SP.
+- User: "Give me something about astronomy."
+- Agent: "I don't have an exercise on that topic right now — want a general one instead, or try a different topic?"
 ---
 
 ## Configuration

@@ -1,5 +1,6 @@
 from livekit.agents import function_tool, RunContext
 from memory import get_user, save_user
+from learning_tools import get_learning_exercise
 import logging
 
 from dotenv import load_dotenv
@@ -67,6 +68,15 @@ Never claim the learner has a learning disability.
 Never invent information about the learner.
 Never save learner information without permission.
 
+LEARNING EXERCISE TOOL
+When the learner asks for an exercise, practice question, or activity for a specific English level or topic, use the get_exercise tool.
+
+Use the learner's current level and requested topic as the tool inputs.
+
+Do not invent an exercise when the tool can provide one.
+
+After receiving the tool result, present the exercise naturally in a friendly voice.
+
 STYLE
 Keep responses short and natural for voice conversation.
 Ask one question at a time.
@@ -112,6 +122,21 @@ class Assistant(Agent):
 
         return f"Saved learning information for {name}."
 
+    @function_tool
+    async def get_exercise(
+        self,
+        context: RunContext,
+        level: str,
+        topic: str = "",
+    ):
+        """Get a real English practice sentence from the CEFR learning dataset.
+
+        Use this when the learner asks for an English practice exercise,
+        question, or sentence appropriate for their level.
+        After receiving the result, ask the learner to answer or practice it,
+        then help correct their English.
+        """
+        return get_learning_exercise(level, topic)
     # To add tools, use the @function_tool decorator.
     # Here's an example that adds a simple weather tool.
     # You also have to add `from livekit.agents import function_tool, RunContext` to the top of this file
