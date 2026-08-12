@@ -1,7 +1,8 @@
 from livekit.agents import function_tool, RunContext
-from memory import get_user, save_user
+from memory import get_user, save_user, create_escalation_in_db
 from learning_tools import get_learning_exercise
 import logging
+import random
 
 from dotenv import load_dotenv
 from livekit import rtc
@@ -77,6 +78,24 @@ Do not invent an exercise when the tool can provide one.
 
 After receiving the tool result, present the exercise naturally in a friendly voice.
 
+ESCALATION FOR HUMAN HELP
+If the learner is upset, frustrated, emotionally distressed about learning, OR if they explicitly ask to speak with a teacher/human or say they need human help:
+1. You must immediately recognize this need.
+2. DO NOT ask the user to provide the description, what you checked, or preferred follow-up method. Instead, immediately tell them you can share a short summary of what they need help with, what you checked, and their preferred follow-up method, and ask for permission.
+   Example: "I think a teacher may be able to help with this. I can share a short summary of what you need help with, what I already checked, and your preferred follow-up method. Would you like me to send that to the teacher?"
+3. If they say YES or clearly agree:
+   - IMMEDIATELY call the `create_escalation` tool. You must automatically fill in the tool arguments (description, checked_actions, urgency, follow_up_method, language) based on the context.
+   - Do NOT ask the user to provide details. Just infer them yourself (e.g. follow_up_method = 'callback' or 'email').
+   - You MUST ensure the description and checked_actions fields DO NOT contain any sensitive information such as passwords, OTPs, PINs, API keys, or account numbers. If the user mentioned any such sensitive information, omit it completely or sanitize it.
+   - After calling the tool, tell them the reference ID (e.g. HELP-123456) returned by the tool.
+   - Inform them that the request has been created and what will happen next (a teacher can review the short summary; do not promise an immediate human response).
+   Example: "I've created a teacher-help request with reference ID HELP-123456. A teacher can review the short summary. I can't guarantee how quickly they will respond."
+4. If they say NO or do not agree:
+   - DO NOT call the `create_escalation` tool.
+   - Continue helping them normally.
+   - Do not pressure them.
+5. For normal English-practice conversations, do NOT escalate or ask about human help.
+
 STYLE
 Keep responses short and natural for voice conversation.
 Ask one question at a time.
@@ -137,6 +156,43 @@ class Assistant(Agent):
         then help correct their English.
         """
         return get_learning_exercise(level, topic)
+
+    @function_tool
+    async def create_escalation(
+        self,
+        context: RunContext,
+        description: str,
+        urgency: str,
+        follow_up_method: str,
+        checked_actions: str = "",
+        language: str = "English",
+        user_id: str = "learner_demo_001",
+    ):
+        """Create a real escalation request for a teacher/human to follow up.
+
+        Only call this tool when the learner has explicitly agreed to share their info and escalate.
+        Before calling this, explain what will be shared and get permission.
+
+        Args:
+            description: Short description of the problem/why they need a teacher.
+            urgency: Urgency level ('low', 'medium', or 'high').
+            follow_up_method: Learner's preferred follow-up method (e.g. email, callback).
+            checked_actions: Short summary of what was checked/done.
+            language: Learner's preferred language (e.g. English, Hindi).
+            user_id: Learner/user identifier if safely available.
+        """
+        ref_id = f"HELP-{random.randint(100000, 999999)}"
+        logger.info(f"Creating escalation: {ref_id} - {description}")
+        create_escalation_in_db(
+            reference_id=ref_id,
+            user_id=user_id,
+            description=description,
+            checked_actions=checked_actions,
+            urgency=urgency,
+            language=language,
+            follow_up_method=follow_up_method,
+        )
+        return ref_id
     # To add tools, use the @function_tool decorator.
     # Here's an example that adds a simple weather tool.
     # You also have to add `from livekit.agents import function_tool, RunContext` to the top of this file

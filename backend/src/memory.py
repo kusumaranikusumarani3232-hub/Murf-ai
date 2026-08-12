@@ -18,6 +18,19 @@ def init_db():
                 last_interaction TEXT
             )
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS escalations (
+                reference_id TEXT PRIMARY KEY,
+                user_id TEXT,
+                description TEXT,
+                checked_actions TEXT,
+                urgency TEXT,
+                language TEXT,
+                follow_up_method TEXT,
+                status TEXT DEFAULT 'open',
+                created_at TEXT
+            )
+        """)
         conn.commit()
 
 
@@ -66,6 +79,42 @@ def save_user(
             current_level,
             topics_covered,
             common_mistakes,
+            datetime.now().isoformat(),
+        ))
+        conn.commit()
+
+
+def create_escalation_in_db(
+    reference_id: str,
+    user_id: str,
+    description: str,
+    checked_actions: str,
+    urgency: str,
+    language: str,
+    follow_up_method: str,
+):
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("""
+            INSERT INTO escalations (
+                reference_id,
+                user_id,
+                description,
+                checked_actions,
+                urgency,
+                language,
+                follow_up_method,
+                status,
+                created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?)
+        """, (
+            reference_id,
+            user_id,
+            description,
+            checked_actions,
+            urgency.lower(),
+            language,
+            follow_up_method,
             datetime.now().isoformat(),
         ))
         conn.commit()
