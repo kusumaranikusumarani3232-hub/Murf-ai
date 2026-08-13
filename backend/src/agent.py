@@ -1,8 +1,6 @@
-from livekit.agents import function_tool, RunContext
-from memory import get_user, save_user, create_escalation_in_db
-from learning_tools import get_learning_exercise
 import logging
 import random
+from datetime import datetime
 
 from dotenv import load_dotenv
 from livekit import rtc
@@ -12,13 +10,17 @@ from livekit.agents import (
     AgentSession,
     JobContext,
     JobProcess,
+    RunContext,
     cli,
-    inference,
-    tokenize,
+    function_tool,
     room_io,
+    tokenize,
 )
-from livekit.plugins import murf, silero, google, deepgram, noise_cancellation
+from livekit.plugins import deepgram, google, murf, noise_cancellation, silero
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
+
+from learning_tools import get_learning_exercise
+from memory import create_escalation_in_db, get_user, save_call_analytics, save_user
 
 logger = logging.getLogger("agent")
 
@@ -78,6 +80,9 @@ Do not invent an exercise when the tool can provide one.
 
 After receiving the tool result, present the exercise naturally in a friendly voice.
 
+EXERCISE COMPLETION TOOL
+Once you have presented the exercise and the learner successfully completes it (e.g. they read/repeat the sentence or answer the exercise correctly), you MUST immediately call the `mark_exercise_completed` tool to record their success. Do not ask for confirmation; just call the tool.
+
 ESCALATION FOR HUMAN HELP
 If the learner is upset, frustrated, emotionally distressed about learning, OR if they explicitly ask to speak with a teacher/human or say they need human help:
 1. You must immediately recognize this need.
@@ -103,9 +108,20 @@ Be encouraging, patient, and friendly.
 """
 DEMO_USER_ID = "learner_demo_001"
 
+
 class Assistant(Agent):
     def __init__(self) -> None:
         super().__init__(instructions=SYSTEM_PROMPT)
+        self.exercise_completed = False
+
+    @function_tool
+    async def mark_exercise_completed(self, context: RunContext):
+        """Mark the current English practice exercise as successfully completed by the learner.
+
+        Call this tool immediately when the learner has successfully completed the English practice exercise (e.g. they repeated the sentence, answered the question correctly, or finished the exercise).
+        """
+        self.exercise_completed = True
+        return "Exercise marked as completed successfully."
 
     @function_tool
     async def lookup_user(self, context: RunContext, user_id: str):
@@ -193,6 +209,7 @@ class Assistant(Agent):
             follow_up_method=follow_up_method,
         )
         return ref_id
+
     # To add tools, use the @function_tool decorator.
     # Here's an example that adds a simple weather tool.
     # You also have to add `from livekit.agents import function_tool, RunContext` to the top of this file
@@ -237,17 +254,17 @@ async def my_agent(ctx: JobContext):
         # A Large Language Model (LLM) is your agent's brain, processing user input and generating a response
         # See all available models at https://docs.livekit.io/agents/models/llm/
         llm=google.LLM(
-                model="gemini-3.5-flash-lite",
-            ),
+            model="gemini-3.5-flash-lite",
+        ),
         # Text-to-speech (TTS) is your agent's voice, turning the LLM's text into speech that the user can hear
         # See all available models as well as voice selections at https://docs.livekit.io/agents/models/tts/
         tts=murf.TTS(
-                voice="Anisha", 
-                locale="en-IN",
-                style="Conversation",
-                tokenizer=tokenize.basic.SentenceTokenizer(min_sentence_len=2),
-                text_pacing=True
-            ),
+            voice="Anisha",
+            locale="en-IN",
+            style="Conversation",
+            tokenizer=tokenize.basic.SentenceTokenizer(min_sentence_len=2),
+            text_pacing=True,
+        ),
         # VAD and turn detection are used to determine when the user is speaking and when the agent should respond
         # See more at https://docs.livekit.io/agents/build/turns
         turn_detection=MultilingualModel(),
@@ -275,9 +292,63 @@ async def my_agent(ctx: JobContext):
     # # Start the avatar and wait for it to join
     # await avatar.start(session, room=ctx.room)
 
+    start_time = datetime.now()
+    recorded = False
+    agent = Assistant()
+
+    async def on_shutdown(*args, **kwargs):
+        nonlocal recorded
+        if recorded:
+            return
+        recorded = True
+
+        duration = int((datetime.now() - start_time).total_seconds())
+        channel = "browser"
+        try:
+            if (
+                ctx.room
+                and hasattr(ctx.room, "remote_participants")
+                and ctx.room.remote_participants
+            ):
+                for p in ctx.room.remote_participants.values():
+                    if p.kind == rtc.ParticipantKind.PARTICIPANT_KIND_SIP:
+                        channel = "sip"
+                        break
+        except Exception as e:
+            logger.warning(f"Error detecting channel in on_shutdown: {e}")
+            channel = "browser"
+
+        outcome = "successful" if agent.exercise_completed else "failed"
+        session_id = f"sess_{int(start_time.timestamp())}"
+        try:
+            if ctx.room:
+                import inspect
+
+                room_sid = ctx.room.sid
+                if inspect.isawaitable(room_sid):
+                    room_sid = await room_sid
+                session_id = room_sid or ctx.room.name or session_id
+        except Exception as e:
+            logger.warning(f"Error retrieving session ID in on_shutdown: {e}")
+
+        logger.info(
+            f"Saving call outcome: {session_id} - channel={channel}, outcome={outcome}, duration={duration}"
+        )
+        try:
+            save_call_analytics(
+                session_id=session_id,
+                channel=channel,
+                outcome=outcome,
+                duration=duration,
+            )
+        except Exception as e:
+            logger.error(f"Failed to save call analytics in on_shutdown: {e}")
+
+    ctx.add_shutdown_callback(on_shutdown)
+
     # Start the session, which initializes the voice pipeline and warms up the models
     await session.start(
-        agent=Assistant(),
+        agent=agent,
         room=ctx.room,
         room_options=room_io.RoomOptions(
             audio_input=room_io.AudioInputOptions(

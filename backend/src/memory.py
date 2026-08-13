@@ -31,6 +31,15 @@ def init_db():
                 created_at TEXT
             )
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS call_analytics (
+                session_id TEXT PRIMARY KEY,
+                timestamp TEXT NOT NULL,
+                channel TEXT NOT NULL,
+                outcome TEXT NOT NULL,
+                duration INTEGER
+            )
+        """)
         conn.commit()
 
 
@@ -38,8 +47,7 @@ def get_user(user_id: str):
     with sqlite3.connect(DB_PATH) as conn:
         conn.row_factory = sqlite3.Row
         row = conn.execute(
-            "SELECT * FROM users WHERE user_id = ?",
-            (user_id,)
+            "SELECT * FROM users WHERE user_id = ?", (user_id,)
         ).fetchone()
 
         return dict(row) if row else None
@@ -54,8 +62,9 @@ def save_user(
     common_mistakes: str = "",
 ):
     with sqlite3.connect(DB_PATH) as conn:
-        conn.execute("""
-            INSERT INTO users (
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO users (
                 user_id,
                 name,
                 language_preference,
@@ -72,15 +81,17 @@ def save_user(
                 topics_covered = excluded.topics_covered,
                 common_mistakes = excluded.common_mistakes,
                 last_interaction = excluded.last_interaction
-        """, (
-            user_id,
-            name,
-            language_preference,
-            current_level,
-            topics_covered,
-            common_mistakes,
-            datetime.now().isoformat(),
-        ))
+        """,
+            (
+                user_id,
+                name,
+                language_preference,
+                current_level,
+                topics_covered,
+                common_mistakes,
+                datetime.now().isoformat(),
+            ),
+        )
         conn.commit()
 
 
@@ -94,8 +105,9 @@ def create_escalation_in_db(
     follow_up_method: str,
 ):
     with sqlite3.connect(DB_PATH) as conn:
-        conn.execute("""
-            INSERT INTO escalations (
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO escalations (
                 reference_id,
                 user_id,
                 description,
@@ -107,17 +119,60 @@ def create_escalation_in_db(
                 created_at
             )
             VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?)
-        """, (
-            reference_id,
-            user_id,
-            description,
-            checked_actions,
-            urgency.lower(),
-            language,
-            follow_up_method,
-            datetime.now().isoformat(),
-        ))
+        """,
+            (
+                reference_id,
+                user_id,
+                description,
+                checked_actions,
+                urgency.lower(),
+                language,
+                follow_up_method,
+                datetime.now().isoformat(),
+            ),
+        )
         conn.commit()
+
+
+def save_call_analytics(
+    session_id: str,
+    channel: str,
+    outcome: str,
+    duration: int | None = None,
+):
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO call_analytics (
+                session_id,
+                timestamp,
+                channel,
+                outcome,
+                duration
+            )
+            VALUES (?, ?, ?, ?, ?)
+        """,
+            (
+                session_id,
+                datetime.now().isoformat(),
+                channel,
+                outcome,
+                duration,
+            ),
+        )
+        conn.commit()
+
+
+def get_call_analytics():
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                "SELECT * FROM call_analytics ORDER BY timestamp DESC"
+            ).fetchall()
+            return [dict(row) for row in rows]
+    except Exception:
+        return []
 
 
 init_db()

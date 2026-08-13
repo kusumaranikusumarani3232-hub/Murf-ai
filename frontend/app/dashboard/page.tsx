@@ -11,6 +11,8 @@ import {
   MessageSquare,
   Phone,
   ShieldAlert,
+  Activity,
+  XCircle,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
@@ -29,6 +31,13 @@ interface Escalation {
 export default function DashboardPage() {
   const [escalations, setEscalations] = useState<Escalation[]>([]);
   const [loading, setLoading] = useState(true);
+  const [analytics, setAnalytics] = useState<{
+    summary: { total_calls: number; successful_calls: number; failed_calls: number };
+    calls: Array<{ session_id: string; timestamp: string; channel: string; outcome: string; duration?: number }>;
+  }>({
+    summary: { total_calls: 0, successful_calls: 0, failed_calls: 0 },
+    calls: [],
+  });
 
   const fetchEscalations = async () => {
     try {
@@ -44,10 +53,26 @@ export default function DashboardPage() {
     }
   };
 
+  const fetchAnalytics = async () => {
+    try {
+      const res = await fetch('/api/analytics');
+      if (res.ok) {
+        const data = await res.json();
+        setAnalytics(data);
+      }
+    } catch (err) {
+      console.error('Failed to load analytics:', err);
+    }
+  };
+
   useEffect(() => {
     fetchEscalations();
-    // Poll every 5 seconds to show new escalations in real-time
-    const interval = setInterval(fetchEscalations, 5000);
+    fetchAnalytics();
+    // Poll every 5 seconds to show new data in real-time
+    const interval = setInterval(() => {
+      fetchEscalations();
+      fetchAnalytics();
+    }, 5000);
     return () => clearInterval(interval);
   }, []);
 
@@ -91,9 +116,62 @@ export default function DashboardPage() {
               </p>
             </div>
           </div>
-          <Button variant="outline" size="sm" onClick={fetchEscalations} className="rounded-full">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              fetchEscalations();
+              fetchAnalytics();
+            }}
+            className="rounded-full"
+          >
             Refresh
           </Button>
+        </div>
+
+        {/* Call Analytics Cards */}
+        <div className="mb-8 grid gap-4 grid-cols-1 sm:grid-cols-3">
+          <div className="border-border bg-card/40 flex items-center justify-between overflow-hidden rounded-2xl border p-6 shadow-xs backdrop-blur-sm">
+            <div>
+              <span className="text-muted-foreground text-xs font-semibold tracking-wider uppercase">
+                Total Calls
+              </span>
+              <h2 className="mt-2 text-3xl font-extrabold tracking-tight text-foreground md:text-4xl">
+                {analytics.summary.total_calls}
+              </h2>
+            </div>
+            <div className="bg-primary/10 rounded-full p-3 text-primary">
+              <Activity className="size-6" />
+            </div>
+          </div>
+
+          <div className="border-border bg-card/40 flex items-center justify-between overflow-hidden rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-6 shadow-xs backdrop-blur-sm">
+            <div>
+              <span className="text-emerald-500 text-xs font-semibold tracking-wider uppercase">
+                Successful Calls
+              </span>
+              <h2 className="mt-2 text-3xl font-extrabold tracking-tight text-emerald-500 md:text-4xl">
+                {analytics.summary.successful_calls}
+              </h2>
+            </div>
+            <div className="bg-emerald-500/10 rounded-full p-3 text-emerald-500">
+              <CheckCircle className="size-6" />
+            </div>
+          </div>
+
+          <div className="border-border bg-card/40 flex items-center justify-between overflow-hidden rounded-2xl border border-red-500/20 bg-red-500/5 p-6 shadow-xs backdrop-blur-sm">
+            <div>
+              <span className="text-red-500 text-xs font-semibold tracking-wider uppercase">
+                Failed Calls
+              </span>
+              <h2 className="mt-2 text-3xl font-extrabold tracking-tight text-red-500 md:text-4xl">
+                {analytics.summary.failed_calls}
+              </h2>
+            </div>
+            <div className="bg-red-500/10 rounded-full p-3 text-red-500">
+              <XCircle className="size-6" />
+            </div>
+          </div>
         </div>
 
         {loading ? (
