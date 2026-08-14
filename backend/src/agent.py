@@ -13,6 +13,7 @@ from livekit.agents import (
     RunContext,
     cli,
     function_tool,
+    llm,
     room_io,
     tokenize,
 )
@@ -100,6 +101,13 @@ If the learner is upset, frustrated, emotionally distressed about learning, OR i
    - Continue helping them normally.
    - Do not pressure them.
 5. For normal English-practice conversations, do NOT escalate or ask about human help.
+
+HANDOFF TO MATH PRACTICE SPECIALIST
+If the learner asks for math practice, calculations, multiplication, division, fractions, percentages, or word problems:
+1. You must immediately recognize this request.
+2. Clearly say exactly: "I'll connect you to our Math Practice Specialist."
+3. IMMEDIATELY call the `connect_to_math_specialist` tool. Do not ask for further details or permission, just call the tool.
+4. Normal English-learning questions must stay with you (the main agent). Do not hand off for English learning or general conversation.
 
 STYLE
 Keep responses short and natural for voice conversation.
@@ -210,22 +218,85 @@ class Assistant(Agent):
         )
         return ref_id
 
-    # To add tools, use the @function_tool decorator.
-    # Here's an example that adds a simple weather tool.
-    # You also have to add `from livekit.agents import function_tool, RunContext` to the top of this file
-    # @function_tool
-    # async def lookup_weather(self, context: RunContext, location: str):
-    #     """Use this tool to look up current weather information in the given location.
-    #
-    #     If the location is not supported by the weather service, the tool will indicate this. You must tell the user the location's weather is unavailable.
-    #
-    #     Args:
-    #         location: The location to look up weather information for (e.g. city name)
-    #     """
-    #
-    #     logger.info(f"Looking up weather for {location}")
-    #
-    #     return "sunny with a temperature of 70 degrees."
+    @function_tool
+    async def connect_to_math_specialist(self, context: RunContext):
+        """Connect the user to the Math Practice Specialist.
+
+        Call this tool only when the user asks for math practice, calculations,
+        multiplication, division, fractions, percentages, or word problems.
+        """
+        logger.info("Transferring to MathPracticeSpecialist")
+        return MathPracticeSpecialist(chat_ctx=self.chat_ctx)
+
+
+MATH_SPECIALIST_PROMPT = """
+IDENTITY
+You are the Math Practice Specialist, a dedicated helper focused strictly on basic arithmetic.
+
+OBJECTIVES
+1. Help the learner practice basic arithmetic: multiplication, division, fractions, percentages, and simple word problems.
+2. Maintain focus solely on math practice. Do not act as a general English tutor or chat about other subjects.
+3. Be friendly, encouraging, patient, and speak in simple, clear English.
+
+TRANSITION INTRO
+When you start, you must introduce yourself by saying exactly:
+"Hi, I'm the Math Practice Specialist."
+Follow this introduction by addressing the user's specific request or asking a simple math question if they don't have a specific request ready.
+
+STYLE
+Keep responses short and natural for voice conversation.
+Ask one question at a time.
+"""
+
+
+class MathPracticeSpecialist(Agent):
+    def __init__(self, chat_ctx: llm.ChatContext) -> None:
+        super().__init__(
+            instructions=MATH_SPECIALIST_PROMPT,
+            chat_ctx=chat_ctx,
+        )
+        self.exercise_completed = False
+
+    async def on_enter(self) -> None:
+        logger.info("MathPracticeSpecialist entering session")
+        self.session.generate_reply(
+            instructions="Introduce yourself by saying exactly 'Hi, I'm the Math Practice Specialist.' Then immediately address the user's math request (found in the chat history) by asking a relevant math practice question."
+        )
+
+    @function_tool
+    async def mark_exercise_completed(self, context: RunContext):
+        """Mark the current math practice exercise as successfully completed by the learner."""
+        self.exercise_completed = True
+        return "Exercise marked as completed successfully."
+
+    @function_tool
+    async def create_escalation(
+        self,
+        context: RunContext,
+        description: str,
+        urgency: str,
+        follow_up_method: str,
+        checked_actions: str = "",
+        language: str = "English",
+        user_id: str = "learner_demo_001",
+    ):
+        """Create a real escalation request for a teacher/human to follow up.
+
+        Only call this tool when the learner has explicitly agreed to share their info and escalate.
+        Before calling this, explain what will be shared and get permission.
+        """
+        ref_id = f"HELP-{random.randint(100000, 999999)}"
+        logger.info(f"Creating escalation: {ref_id} - {description}")
+        create_escalation_in_db(
+            reference_id=ref_id,
+            user_id=user_id,
+            description=description,
+            checked_actions=checked_actions,
+            urgency=urgency,
+            language=language,
+            follow_up_method=follow_up_method,
+        )
+        return ref_id
 
 
 server = AgentServer()
@@ -318,7 +389,9 @@ async def my_agent(ctx: JobContext):
             logger.warning(f"Error detecting channel in on_shutdown: {e}")
             channel = "browser"
 
-        outcome = "successful" if agent.exercise_completed else "failed"
+        current_agent = session.current_agent if hasattr(session, "current_agent") else agent
+        exercise_completed = getattr(current_agent, "exercise_completed", False)
+        outcome = "successful" if exercise_completed else "failed"
         session_id = f"sess_{int(start_time.timestamp())}"
         try:
             if ctx.room:
